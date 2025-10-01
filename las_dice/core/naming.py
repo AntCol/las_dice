@@ -1,1 +1,1 @@
-\"\"\"Placeholder for naming.py module.\"\"\"
+"""Placeholder for naming module."""

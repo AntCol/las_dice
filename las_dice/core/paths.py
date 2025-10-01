@@ -1,1 +1,1 @@
-\"\"\"Placeholder for paths.py module.\"\"\"
+"""Placeholder for paths module."""

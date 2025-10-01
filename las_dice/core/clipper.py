@@ -1,1 +1,1 @@
-\"\"\"Placeholder for clipper.py module.\"\"\"
+"""Placeholder for clipper module."""

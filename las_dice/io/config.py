@@ -1,1 +1,1 @@
-\"\"\"Placeholder for config.py module.\"\"\"
+"""Placeholder for config module."""
