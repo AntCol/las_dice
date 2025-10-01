@@ -1,6 +1,17 @@
-# Placeholder environment specification. To be completed in milestone 2.
 name: las_dice
 channels:
   - conda-forge
+  - defaults
 dependencies:
   - python=3.9
+  - pdal
+  - python-pdal
+  - geopandas
+  - fiona
+  - shapely
+  - pyproj
+  - gdal
+  - click
+  - tqdm
+  - rich
+  - pytest
