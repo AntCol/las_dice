@@ -1,0 +1,10 @@
+[project]
+name = "las-dice"
+version = "0.0.0"
+description = "LAS clipping toolkit built atop PDAL"
+authors = []
+requires-python = ">=3.9"
+
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"

@@ -1,0 +1,6 @@
+# Placeholder environment specification. To be completed in milestone 2.
+name: las_dice
+channels:
+  - conda-forge
+dependencies:
+  - python=3.9
