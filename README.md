@@ -4,7 +4,10 @@ Short overview goes here.
 
 ## Getting started
 
-_TBD_
+1. `conda env update -n las_dice -f environment.yml`
+2. `conda activate las_dice`
+3. `pdal --version`
+4. `python -c "import pdal, geopandas"`
 
 ## Environment notes
 
