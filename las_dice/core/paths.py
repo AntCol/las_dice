@@ -9,7 +9,7 @@ from typing import Dict, Iterable, List, Sequence
 
 import geopandas as gpd
 
-from .crs import CRSValidationError, ensure_consistent_las_crs
+from .crs import CRSValidationError
 from .tindex import PATH_FIELD
 
 
@@ -23,21 +23,20 @@ class SourceSelectionError(RuntimeError):
     """Raised when source selection cannot complete."""
 
 
-def _ensure_crs_match(polygons: gpd.GeoDataFrame, tindex: gpd.GeoDataFrame) -> None:
-    try:
-        poly_crs = polygons.crs
-        las_crs = ensure_consistent_las_crs([tindex.crs])
-    except CRSValidationError as exc:
-        raise SourceSelectionError(str(exc)) from exc
-    if poly_crs is None:
+def _align_tindex_crs(polygons: gpd.GeoDataFrame, tindex: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    if polygons.crs is None:
         raise SourceSelectionError("Polygon CRS is undefined; cannot intersect")
-    if las_crs is None:
+    if tindex.crs is None:
         raise SourceSelectionError("Tile index CRS is undefined; rebuild or annotate it")
-    if poly_crs.to_string() != las_crs.to_string():
+    poly_crs = polygons.crs
+    try:
+        if poly_crs.to_string() != tindex.crs.to_string():
+            return tindex.to_crs(poly_crs)
+    except Exception as exc:
         raise SourceSelectionError(
-            "Polygon and tile index CRS differ; reproject polygons to match LAS CRS"
-        )
-
+            "Failed to reproject tile index to polygon CRS"
+        ) from exc
+    return tindex
 
 def match_polygons_to_sources(
     polygons: gpd.GeoDataFrame,
@@ -46,7 +45,7 @@ def match_polygons_to_sources(
     """Return a mapping of polygon index to intersecting LAS file paths."""
     if PATH_FIELD not in tindex.columns:
         raise SourceSelectionError(f"Tile index missing required column '{PATH_FIELD}'")
-    _ensure_crs_match(polygons, tindex)
+    tindex = _align_tindex_crs(polygons, tindex)
     intersections = gpd.overlay(polygons.reset_index(), tindex[["geometry", PATH_FIELD]], how="intersection")
     mapping: Dict[int, List[Path]] = defaultdict(list)
     for _, row in intersections.iterrows():
@@ -71,3 +70,6 @@ def match_polygons_with_empty_reports(
         if idx not in matched_ids:
             all_results.append(PolygonSources(polygon_id=idx, source_paths=[]))
     return sorted(all_results, key=lambda entry: entry.polygon_id)
+
+
+

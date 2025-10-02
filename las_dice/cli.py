@@ -33,17 +33,25 @@ def list_fields(source: Path, layer: str | None) -> None:
 @click.option("--output", required=True, type=click.Path(dir_okay=False, path_type=Path))
 @click.option("--layer", default=tindex.TINDEX_LAYER, show_default=True)
 @click.option("--driver", default=tindex.TINDEX_DRIVER, show_default=True)
+@click.option("--overwrite", is_flag=True, help="Allow overwriting an existing tindex file.")
 def build_tindex_cmd(
     roots: Tuple[Path, ...],
     output: Path,
     layer: str,
     driver: str,
+    overwrite: bool,
 ) -> None:
     """Build a PDAL tile index from LAS/LAZ roots."""
     if not roots:
         raise click.UsageError("Provide at least one root directory")
+    if output.exists() and not overwrite:
+        raise click.ClickException(
+            "Tindex destination already exists. Use --overwrite or choose a new file."
+        )
+    if output.exists() and overwrite:
+        logging_utils.log_info(f"Overwriting existing tindex: {output}")
     try:
-        result = tindex.build_tindex(roots, output, layer, driver)
+        result = tindex.build_tindex(roots, output, layer, driver, overwrite=overwrite)
     except Exception as exc:  # pragma: no cover
         raise click.ClickException(str(exc)) from exc
     click.echo(f"Tile index written to {result}")
@@ -62,7 +70,7 @@ def validate_tindex_cmd(tindex_path: Path, layer: str) -> None:
 
 
 @cli.command(name="clip")
-@click.option("--polygons", required=True, type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--polygons", "polygons_path", required=True, type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @click.option("--layer", help="Layer name for GeoPackage polygon source.")
 @click.option("--name-field", help="Polygon attribute to use for output naming.")
 @click.option("--tindex", "tindex_path", required=True, type=click.Path(exists=True, dir_okay=False, path_type=Path))
@@ -98,6 +106,11 @@ def clip_cmd(
 
     planned_outputs = []
     for record in matches:
+        if not record.source_paths:
+            logging_utils.log_info(
+                f"Polygon {record.polygon_id}: no intersecting LAS files"
+            )
+            continue
         name = make_output_name(record.polygon_id)
         output_path = naming.build_output_path(name, outdir)
         planned_outputs.append((record, output_path))
@@ -112,14 +125,12 @@ def clip_cmd(
     produced = []
     for record, output_path in planned_outputs:
         if output_path.exists() and not overwrite:
-            raise click.ClickException(
-                f"Output exists: {output_path}. Use --overwrite to replace it."
-            )
-        if not record.source_paths:
             logging_utils.log_info(
-                f"Polygon {record.polygon_id}: no intersecting LAS files; skipping"
+                f"Polygon {record.polygon_id}: output exists ({output_path}); skipping"
             )
             continue
+        if overwrite and output_path.exists():
+            output_path.unlink()
         try:
             clipper.clip_polygons(
                 polygons=poly_gdf.geometry,
@@ -133,7 +144,6 @@ def clip_cmd(
         logging_utils.log_info(
             f"Polygon {record.polygon_id}: wrote {output_path} from {len(record.source_paths)} sources"
         )
-
     logging_utils.log_info(f"Completed clipping {len(produced)} polygon(s)")
 
 
@@ -144,3 +154,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+

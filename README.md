@@ -19,3 +19,8 @@ Short overview goes here.
 - Polygon inputs must declare a CRS; undefined CRS is treated as an error.
 - Output LAS/LAZ files inherit the CRS from the input LAS sources (no reprojection yet).
 - Mixed CRS among LAS sources is considered a fatal error and must be resolved upstream.
+
+## Tile index safety
+- Always write the PDAL tile index to a separate GeoPackage from source polygons.
+- The CLI now refuses to overwrite an existing tindex unless `--overwrite` is provided.
+- Keep original polygon data read-only or under version control.

@@ -5,11 +5,11 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Iterable, List
 
 from geopandas import GeoSeries
+from shapely import to_wkt as shapely_to_wkt
 
-from .crs import CRSValidationError, ensure_consistent_las_crs
 from .paths import PolygonSources
 
 
@@ -21,11 +21,11 @@ def _ensure_output_dir(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
 
-def _check_crs_consistency(las_crs_values: Iterable[object]) -> None:
+def _geometry_to_wkt(geometry) -> str:
     try:
-        ensure_consistent_las_crs(las_crs_values)
-    except CRSValidationError as exc:
-        raise ClippingError(str(exc)) from exc
+        return shapely_to_wkt(geometry, rounding_precision=8)
+    except Exception as exc:  # pragma: no cover
+        raise ClippingError("Failed to serialize polygon geometry to WKT") from exc
 
 
 def _build_pipeline(
@@ -51,11 +51,12 @@ def _build_pipeline(
     writer = {
         "type": "writers.las",
         "filename": str(output_path),
-        "forward": "all" if forward_vlrs else "scale_z"  # minimal placeholder
+        "forward": "all" if forward_vlrs else "scale",
+        "scale_x": 0.01,
+        "scale_y": 0.01,
+        "scale_z": 0.01,
     }
-    return {
-        "pipeline": readers + filters + [writer]
-    }
+    return {"pipeline": readers + filters + [writer]}
 
 
 def _run_pipeline(pipeline: dict) -> None:
@@ -83,7 +84,7 @@ def clip_polygons(
         if not record.source_paths:
             continue
         geometry = polygons.iloc[record.polygon_id]
-        polygon_wkt = geometry.to_wkt()
+        polygon_wkt = _geometry_to_wkt(geometry)
         output_path = output_dir / name_builder(record.polygon_id)
         _ensure_output_dir(output_path)
         pipeline = _build_pipeline(record.source_paths, polygon_wkt, output_path, forward_vlrs)
