@@ -24,3 +24,6 @@ Short overview goes here.
 - Always write the PDAL tile index to a separate GeoPackage from source polygons.
 - The CLI now refuses to overwrite an existing tindex unless `--overwrite` is provided.
 - Keep original polygon data read-only or under version control.
+
+- Use \--fast-boundary\ on \uild-tindex\ to rely on bounding boxes for faster indexing of huge datasets.
+

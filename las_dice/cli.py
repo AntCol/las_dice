@@ -34,12 +34,14 @@ def list_fields(source: Path, layer: str | None) -> None:
 @click.option("--layer", default=tindex.TINDEX_LAYER, show_default=True)
 @click.option("--driver", default=tindex.TINDEX_DRIVER, show_default=True)
 @click.option("--overwrite", is_flag=True, help="Allow overwriting an existing tindex file.")
+@click.option("--fast-boundary", is_flag=True, help="Use PDAL fast boundary (bbox) instead of convex hull.")
 def build_tindex_cmd(
     roots: Tuple[Path, ...],
     output: Path,
     layer: str,
     driver: str,
     overwrite: bool,
+    fast_boundary: bool,
 ) -> None:
     """Build a PDAL tile index from LAS/LAZ roots."""
     if not roots:
@@ -51,7 +53,7 @@ def build_tindex_cmd(
     if output.exists() and overwrite:
         logging_utils.log_info(f"Overwriting existing tindex: {output}")
     try:
-        result = tindex.build_tindex(roots, output, layer, driver, overwrite=overwrite)
+        result = tindex.build_tindex(roots, output, layer, driver, overwrite=overwrite, fast_boundary=fast_boundary)
     except Exception as exc:  # pragma: no cover
         raise click.ClickException(str(exc)) from exc
     click.echo(f"Tile index written to {result}")

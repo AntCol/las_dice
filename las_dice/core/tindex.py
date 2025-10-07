@@ -54,6 +54,7 @@ def build_tindex(
     driver: str = TINDEX_DRIVER,
     *,
     overwrite: bool = False,
+    fast_boundary: bool = False,
 ) -> Path:
     file_paths = _gather_files(roots)
     output_path = Path(output).resolve()
@@ -81,6 +82,8 @@ def build_tindex(
         PATH_FIELD,
         "--write_absolute_path",
     ]
+    if fast_boundary:
+        args.append("--fast_boundary")
     _pdal_command(args, stdin=stdin_bytes)
     return output_path
 
