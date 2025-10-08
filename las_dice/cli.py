@@ -7,7 +7,8 @@ from typing import List, Optional, Tuple
 
 import click
 
-from .core import clipper, logging_utils, naming, paths, tindex
+from .core import clipper, paths, tindex
+from .core.utils import NamingOptions, build_name_getter, build_output_path, log_info, progress_tracker, status
 from .io import config as config_io
 from .io import polygons
 
@@ -380,3 +381,9 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+

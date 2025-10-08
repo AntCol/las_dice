@@ -11,6 +11,7 @@ from geopandas import GeoSeries
 from shapely import to_wkt as shapely_to_wkt
 
 from .paths import PolygonSources
+from .utils import log_info
 
 
 class ClippingError(RuntimeError):
@@ -91,3 +92,9 @@ def clip_polygons(
         _run_pipeline(pipeline)
         output_paths.append(output_path)
     return output_paths
+
+
+
+
+
+
