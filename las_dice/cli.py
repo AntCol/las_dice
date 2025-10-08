@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import click
 
 from .core import clipper, logging_utils, naming, paths, tindex
+from .io import config as config_io
 from .io import polygons
 
 
@@ -26,6 +27,187 @@ def list_fields(source: Path, layer: str | None) -> None:
             click.echo(line)
     except Exception as exc:  # pragma: no cover
         raise click.ClickException(str(exc)) from exc
+
+
+def _prompt_las_roots() -> List[Path]:
+    roots: List[Path] = []
+    click.echo("Enter LAS/LAZ root directories (blank to finish):")
+    while True:
+        value = click.prompt("Root", default="", show_default=False)
+        if not value:
+            break
+        path = Path(value).expanduser()
+        if not path.exists() or not path.is_dir():
+            click.echo("  ! Directory does not exist; try again.")
+            continue
+        roots.append(path)
+    if not roots:
+        raise click.ClickException("At least one LAS root directory is required.")
+    return roots
+
+
+def _summarise_results(results: List[dict]) -> None:
+    written = len([row for row in results if row["status"] == "written"])
+    skipped = len([row for row in results if row["status"] == "exists"])
+    errors = [row for row in results if row["status"] == "error"]
+    logging_utils.log_info(
+        f"Run summary: {written} written, {skipped} skipped (already existed), {len(errors)} errors"
+    )
+    if errors:
+        logging_utils.log_info("Errored polygons:")
+        for row in errors:
+            logging_utils.log_info(f"  Polygon {row['polygon_id']} -> {row['output']}: {row['error']}")
+
+
+def _build_name_wrapper(poly_gdf, name_field: Optional[str], suffix: Optional[str]):
+    base_getter = naming.build_name_getter(name_field, suffix)
+
+    def wrapper(polygon_id: int) -> str:
+        attrs = poly_gdf.iloc[polygon_id].to_dict()
+        attrs.setdefault("polygon_id", polygon_id)
+        return base_getter(attrs)
+
+    return wrapper
+
+
+def _plan_outputs(poly_gdf, matches, outdir: Path, name_builder) -> Tuple[List[Tuple[paths.PolygonSources, Path]], List[int]]:
+    planned: List[Tuple[paths.PolygonSources, Path]] = []
+    empties: List[int] = []
+    for record in matches:
+        if not record.source_paths:
+            empties.append(record.polygon_id)
+            continue
+        name = name_builder(record.polygon_id)
+        output_path = naming.build_output_path(name, outdir)
+        planned.append((record, output_path))
+    return planned, empties
+
+
+def _execute_clips(planned, poly_gdf, outdir: Path, overwrite: bool) -> List[dict]:
+    results: List[dict] = []
+    if not planned:
+        return results
+
+    with logging_utils.progress_tracker("Clipping polygons", total=len(planned)) as advance:
+        for record, output_path in planned:
+            if output_path.exists() and not overwrite:
+                logging_utils.log_info(
+                    f"Polygon {record.polygon_id}: output exists ({output_path}); skipping"
+                )
+                results.append(
+                    {
+                        "polygon_id": record.polygon_id,
+                        "output": str(output_path),
+                        "sources": len(record.source_paths),
+                        "status": "exists",
+                    }
+                )
+                advance()
+                continue
+            if overwrite and output_path.exists():
+                output_path.unlink()
+            try:
+                clipper.clip_polygons(
+                    polygons=poly_gdf.geometry,
+                    polygon_records=[record],
+                    output_dir=outdir,
+                    name_builder=lambda _: output_path.name,
+                )
+            except Exception as exc:  # pragma: no cover
+                logging_utils.log_info(
+                    f"Polygon {record.polygon_id}: ERROR {exc}"
+                )
+                results.append(
+                    {
+                        "polygon_id": record.polygon_id,
+                        "output": str(output_path),
+                        "sources": len(record.source_paths),
+                        "status": "error",
+                        "error": str(exc),
+                    }
+                )
+                advance()
+                continue
+            logging_utils.log_info(
+                f"Polygon {record.polygon_id}: wrote {output_path} from {len(record.source_paths)} sources"
+            )
+            results.append(
+                {
+                    "polygon_id": record.polygon_id,
+                    "output": str(output_path),
+                    "sources": len(record.source_paths),
+                    "status": "written",
+                }
+            )
+            advance()
+    return results
+
+
+@cli.command(name="init")
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=config_io.DEFAULT_CONFIG_NAME,
+    help="Target configuration file path.",
+)
+def init_cmd(config_path: Path) -> None:
+    """Interactive wizard to capture project configuration."""
+    click.echo("LAS Dice setup wizard")
+    click.echo("---------------------")
+    polygons_path = click.prompt(
+        "Polygon dataset path",
+        type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    )
+    layer_value = click.prompt(
+        "Polygon layer (blank for default)", default="", show_default=False
+    )
+    polygons_layer = layer_value or None
+    las_roots = _prompt_las_roots()
+    suggested_tindex = polygons_path.parent / "las_tindex.gpkg"
+    tindex_path = click.prompt(
+        "Tile index output path",
+        default=str(suggested_tindex),
+        type=click.Path(dir_okay=False, writable=True, path_type=Path),
+    )
+    tindex_layer = click.prompt(
+        "Tile index layer name",
+        default=tindex.TINDEX_LAYER,
+    )
+    output_dir = click.prompt(
+        "Output directory",
+        type=click.Path(path_type=Path),
+        default=str(polygons_path.parent / "clipped_outputs"),
+    )
+    name_field = click.prompt(
+        "Polygon attribute for naming (blank for default)",
+        default="",
+        show_default=False,
+    )
+    suffix = click.prompt(
+        "Optional suffix to append (blank for none)", default="", show_default=False
+    )
+    fast_boundary = click.confirm(
+        "Use fast boundary (recommended for large datasets)?", default=True
+    )
+    overwrite = click.confirm("Overwrite existing outputs when running?", default=False)
+    dry_run = click.confirm("Perform a dry-run by default?", default=False)
+
+    config = config_io.RunConfig(
+        polygons=polygons_path,
+        polygons_layer=polygons_layer,
+        las_roots=las_roots,
+        tindex_path=tindex_path,
+        tindex_layer=tindex_layer,
+        output_dir=output_dir,
+        name_field=name_field or None,
+        suffix=suffix or None,
+        fast_boundary=fast_boundary,
+        overwrite=overwrite,
+        dry_run=dry_run,
+    )
+    saved = config_io.save_config(config, config_path)
+    logging_utils.log_info(f"Configuration saved to {saved}")
 
 
 @cli.command(name="build-tindex")
@@ -53,7 +235,10 @@ def build_tindex_cmd(
     if output.exists() and overwrite:
         logging_utils.log_info(f"Overwriting existing tindex: {output}")
     try:
-        result = tindex.build_tindex(roots, output, layer, driver, overwrite=overwrite, fast_boundary=fast_boundary)
+        with logging_utils.status("Building tile index..."):
+            result = tindex.build_tindex(
+                roots, output, layer, driver, overwrite=overwrite, fast_boundary=fast_boundary
+            )
     except Exception as exc:  # pragma: no cover
         raise click.ClickException(str(exc)) from exc
     click.echo(f"Tile index written to {result}")
@@ -99,54 +284,93 @@ def clip_cmd(
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc
 
-    name_getter = naming.build_name_getter(name_field, suffix)
+    name_wrapper = _build_name_wrapper(poly_gdf, name_field, suffix)
+    planned, empties = _plan_outputs(poly_gdf, matches, outdir, name_wrapper)
 
-    def make_output_name(polygon_id: int) -> str:
-        attrs = poly_gdf.iloc[polygon_id].to_dict()
-        attrs.setdefault("polygon_id", polygon_id)
-        return name_getter(attrs)
-
-    planned_outputs = []
-    for record in matches:
-        if not record.source_paths:
-            logging_utils.log_info(
-                f"Polygon {record.polygon_id}: no intersecting LAS files"
-            )
-            continue
-        name = make_output_name(record.polygon_id)
-        output_path = naming.build_output_path(name, outdir)
-        planned_outputs.append((record, output_path))
+    for pid in empties:
+        logging_utils.log_info(f"Polygon {pid}: no intersecting LAS files")
 
     if dry_run:
-        for record, output_path in planned_outputs:
+        for record, output_path in planned:
             logging_utils.log_info(
                 f"Polygon {record.polygon_id}: {len(record.source_paths)} sources -> {output_path}"
             )
         return
 
-    produced = []
-    for record, output_path in planned_outputs:
-        if output_path.exists() and not overwrite:
+    results = _execute_clips(planned, poly_gdf, outdir, overwrite)
+    _summarise_results(results)
+
+
+@cli.command(name="run")
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=config_io.DEFAULT_CONFIG_NAME,
+    help="Configuration file to load.",
+)
+@click.option("--dry-run", "dry_run_override", flag_value=True, default=None)
+@click.option("--execute", "dry_run_override", flag_value=False)
+@click.option("--overwrite", "overwrite_override", flag_value=True, default=None)
+@click.option("--no-overwrite", "overwrite_override", flag_value=False)
+def run_cmd(
+    config_path: Path,
+    dry_run_override: Optional[bool],
+    overwrite_override: Optional[bool],
+) -> None:
+    """Execute full workflow using the saved configuration."""
+    try:
+        config = config_io.load_config(config_path)
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    if dry_run_override is not None:
+        config.dry_run = dry_run_override
+    if overwrite_override is not None:
+        config.overwrite = overwrite_override
+
+    logging_utils.log_info("Starting LAS Dice workflow")
+    try:
+        with logging_utils.status("Building tile index..."):
+            tindex.build_tindex(
+                config.las_roots,
+                config.tindex_path,
+                config.tindex_layer,
+                tindex.TINDEX_DRIVER,
+                overwrite=config.overwrite,
+                fast_boundary=config.fast_boundary,
+            )
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    for line in tindex.describe_tindex(config.tindex_path, config.tindex_layer):
+        logging_utils.log_info(line)
+
+    try:
+        poly_gdf, _, _, _ = polygons.read_polygons(config.polygons, config.polygons_layer)
+        tindex_gdf = tindex.read_tindex(config.tindex_path, config.tindex_layer)
+        matches = paths.match_polygons_with_empty_reports(poly_gdf, tindex_gdf)
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    name_wrapper = _build_name_wrapper(poly_gdf, config.name_field, config.suffix)
+    planned, empties = _plan_outputs(poly_gdf, matches, config.output_dir, name_wrapper)
+
+    for pid in empties:
+        logging_utils.log_info(f"Polygon {pid}: no intersecting LAS files")
+
+    if config.dry_run:
+        logging_utils.log_info("Dry run: planned outputs")
+        for record, output_path in planned:
             logging_utils.log_info(
-                f"Polygon {record.polygon_id}: output exists ({output_path}); skipping"
+                f"Polygon {record.polygon_id}: {len(record.source_paths)} sources -> {output_path}"
             )
-            continue
-        if overwrite and output_path.exists():
-            output_path.unlink()
-        try:
-            clipper.clip_polygons(
-                polygons=poly_gdf.geometry,
-                polygon_records=[record],
-                output_dir=outdir,
-                name_builder=lambda _: output_path.name,
-            )
-        except Exception as exc:  # pragma: no cover
-            raise click.ClickException(str(exc)) from exc
-        produced.append(output_path)
-        logging_utils.log_info(
-            f"Polygon {record.polygon_id}: wrote {output_path} from {len(record.source_paths)} sources"
-        )
-    logging_utils.log_info(f"Completed clipping {len(produced)} polygon(s)")
+        return
+
+    results = _execute_clips(planned, poly_gdf, config.output_dir, config.overwrite)
+    _summarise_results(results)
+    config_io.save_config(config, config_path)
+    logging_utils.log_info("Workflow completed")
 
 
 def main() -> None:
@@ -156,6 +380,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
-
