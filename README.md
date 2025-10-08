@@ -9,18 +9,18 @@ LAS Dice clips large LAS/LAZ collections against polygon footprints using PDAL. 
 4. `python -c "import pdal, geopandas"`
 
 ## Guided workflow
-- `python -m las_dice.cli init` walks through the required inputs (polygon data, LAS roots, output directory, etc.) and saves them into `las_dice_config.json`.
-- `python -m las_dice.cli run` uses the saved configuration to build a tile index (with PDAL `--fast_boundary` by default), validates it, runs a dry-run preview if configured, and clips polygons with rich progress updates.
-- Re-run `python -m las_dice.cli run --execute` at any time; existing outputs are skipped unless `--overwrite` is provided.
+- `python las_dice.py` launches the interactive wizard, saves a fresh configuration (JSON), builds the PDAL tile index with fast boundaries, validates it, and clips polygons with progress updates. Outputs that already exist are skipped automatically.
+- `python -m las_dice.cli run --config my_project.json` does the same but lets you pick a custom config path.
+- `python -m las_dice.cli init` runs only the wizard, saving inputs for later.
 
 ## Advanced commands
 - `python -m las_dice.cli build-tindex ... --fast-boundary` builds the PDAL tile index directly.
-- `python -m las_dice.cli validate-tindex ...` prints tindex metadata, CRS, and sample paths.
-- `python -m las_dice.cli clip ...` runs the clipper manually for advanced use cases.
+- `python -m las_dice.cli validate-tindex ...` prints tile index metadata.
+- `python -m las_dice.cli clip ...` clips against custom inputs.
 
 ## Environment notes
 - Use the provided `environment.yml` with `conda-forge` to install PDAL/GDAL stack on Windows 11.
-- PDAL tile indexing is fastest with `--fast-boundary`, which the `run` workflow uses automatically.
+- PDAL tile indexing is fastest with `--fast-boundary`, which the guided workflow uses automatically.
 - Windows users should allow Conda to resolve `pdal`, `gdal`, and `python-pdal` from `conda-forge` to ensure binary compatibility.
 
 ## CRS policy
@@ -30,6 +30,5 @@ LAS Dice clips large LAS/LAZ collections against polygon footprints using PDAL. 
 
 ## Tile index safety
 - Always write the PDAL tile index to a separate GeoPackage from source polygons.
-- The CLI refuses to overwrite an existing tindex unless `--overwrite` is provided.
+- The CLI refuses to overwrite an existing tindex unless `--overwrite` is provided (the guided workflow overwrites intentionally to refresh the index).
 - Keep original polygon data read-only or under version control.
-

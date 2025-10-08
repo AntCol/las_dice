@@ -21,8 +21,6 @@ class RunConfig:
     name_field: Optional[str]
     suffix: Optional[str] = None
     fast_boundary: bool = True
-    overwrite: bool = False
-    dry_run: bool = False
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "RunConfig":
@@ -36,8 +34,6 @@ class RunConfig:
             name_field=data.get("name_field"),
             suffix=data.get("suffix"),
             fast_boundary=data.get("fast_boundary", True),
-            overwrite=data.get("overwrite", False),
-            dry_run=data.get("dry_run", False),
         )
 
     def to_dict(self) -> Dict[str, Any]:
