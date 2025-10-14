@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from typing import Iterable, List
+from typing import Iterable, List, Optional
 
 import geopandas as gpd
 
@@ -55,6 +55,7 @@ def build_tindex(
     *,
     overwrite: bool = False,
     fast_boundary: bool = False,
+    target_srs: Optional[str] = None,
 ) -> Path:
     file_paths = _gather_files(roots)
     output_path = Path(output).resolve()
@@ -84,6 +85,8 @@ def build_tindex(
     ]
     if fast_boundary:
         args.append("--fast_boundary")
+    if target_srs:
+        args.extend(["--t_srs", target_srs])
     _pdal_command(args, stdin=stdin_bytes)
     return output_path
 

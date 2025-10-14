@@ -9,26 +9,32 @@ LAS Dice clips large LAS/LAZ collections against polygon footprints using PDAL. 
 4. `python -c "import pdal, geopandas"`
 
 ## Guided workflow
-- `python las_dice.py` launches the interactive wizard, saves a fresh configuration (JSON), builds the PDAL tile index with fast boundaries, validates it, and clips polygons with progress updates. Outputs that already exist are skipped automatically.
-- `python -m las_dice.cli run --config my_project.json` does the same but lets you pick a custom config path.
-- `python -m las_dice.cli init` runs only the wizard, saving inputs for later.
+Run `python las_dice.py`. The wizard will:
+- Ask for the polygon GeoPackage and list its layers; pick by number.
+- Read the layer, list its attribute fields (numbered), and prompt for the naming field.
+- Ask for the LAS/LAZ root directory.
+- Ask where to write the tile index (directory or filename) and the layer name; index is built in the polygon CRS.
+- Ask for the output directory and optional naming suffix.
+- Confirm fast-boundary usage (defaults to yes).
+- Build the tindex, validate, and clip polygons, showing a “Clipping LAS” progress bar. Existing outputs are skipped automatically. Clipped LAS inherit the source CRS.
+
+The wizard writes a fresh `las_dice_config.json` each run; use `python -m las_dice.cli run --config my_project.json` if you need multiple configs.
 
 ## Advanced commands
-- `python -m las_dice.cli build-tindex ... --fast-boundary` builds the PDAL tile index directly.
-- `python -m las_dice.cli validate-tindex ...` prints tile index metadata.
-- `python -m las_dice.cli clip ...` clips against custom inputs.
+- `python -m las_dice.cli init --config my_project.json` just captures inputs.
+- `python -m las_dice.cli build-tindex <root> ... --output <file> --fast-boundary` builds a tile index directly.
+- `python -m las_dice.cli validate-tindex <file>` prints index metadata.
+- `python -m las_dice.cli clip ...` runs clipping with custom paths/params.
 
 ## Environment notes
-- Use the provided `environment.yml` with `conda-forge` to install PDAL/GDAL stack on Windows 11.
-- PDAL tile indexing is fastest with `--fast-boundary`, which the guided workflow uses automatically.
-- Windows users should allow Conda to resolve `pdal`, `gdal`, and `python-pdal` from `conda-forge` to ensure binary compatibility.
+- Use `environment.yml` via conda-forge on Windows 11 for PDAL/GDAL compatibility.
+- Fast boundary mode (bounding boxes) is the default and recommended for large datasets.
 
 ## CRS policy
-- Polygon inputs must declare a CRS; undefined CRS is treated as an error.
-- Output LAS/LAZ inherit the CRS from the input LAS sources (no reprojection yet).
-- Mixed CRS among LAS sources is considered a fatal error and must be resolved upstream.
+- Polygons must declare a CRS; the wizard enforces this.
+- Tile index and clipped LAS/LAZ inherit the polygon CRS automatically.
+- Mixed CRS among LAS sources must be fixed upstream; the run fails fast if encountered.
 
 ## Tile index safety
-- Always write the PDAL tile index to a separate GeoPackage from source polygons.
-- The CLI refuses to overwrite an existing tindex unless `--overwrite` is provided (the guided workflow overwrites intentionally to refresh the index).
-- Keep original polygon data read-only or under version control.
+- Tile index is written alongside source data in a separate GeoPackage; the wizard overwrites intentionally for repeat runs.
+- Keep original polygon data versioned or read-only to avoid accidental modifications.

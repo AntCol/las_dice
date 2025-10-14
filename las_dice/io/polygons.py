@@ -6,11 +6,21 @@ from pathlib import Path
 from typing import Iterable, List, Optional, Tuple
 
 import geopandas as gpd
+from fiona import listlayers
 
 AttributeFields = List[str]
 ReadResult = Tuple[gpd.GeoDataFrame, Optional[str], int, AttributeFields]
 
 SUPPORTED_EXTENSIONS: Tuple[str, ...] = (".gpkg", ".shp")
+
+
+def list_layers(path: Path | str) -> List[str]:
+    candidate = Path(path).expanduser().resolve()
+    if not candidate.exists():
+        raise FileNotFoundError(f"Polygon source not found: {candidate}")
+    if candidate.suffix.lower() != ".gpkg":
+        raise ValueError("Layer listing is only supported for GeoPackage files")
+    return listlayers(candidate)
 
 
 def _normalize_path(path: Path | str) -> Path:
@@ -61,3 +71,5 @@ def describe_fields(path: Path | str, layer: Optional[str] = None) -> Iterable[s
             yield f"  - {name}"
     else:
         yield "Fields: <none>"
+
+

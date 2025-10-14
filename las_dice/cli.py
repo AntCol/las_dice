@@ -19,7 +19,12 @@ from .core.utils import (
 from .io import config as config_io
 from .io import polygons
 
-@click.group()
+
+def _clean_path(value: str) -> Path:
+    """Trim surrounding quotes/whitespace and expanduser."""
+    return Path(value.strip(" '\"")).expanduser()
+
+@click.group()
 def cli() -> None:
     """Manage LAS Dice operations."""
 
@@ -36,76 +41,117 @@ def list_fields(source: Path, layer: str | None) -> None:
         raise click.ClickException(str(exc)) from exc
 
 
-def _prompt_las_roots() -> List[Path]:
-    roots: List[Path] = []
-    click.echo("Enter LAS/LAZ root directories (blank to finish):")
-    while True:
-        value = click.prompt("Root", default="", show_default=False)
-        if not value:
-            break
-        path = Path(value).expanduser()
-        if not path.exists() or not path.is_dir():
-            click.echo("  ! Directory does not exist; try again.")
-            continue
-        roots.append(path)
-    if not roots:
-        raise click.ClickException("At least one LAS root directory is required.")
-    return roots
+def _prompt_las_root() -> Path:
+    value = click.prompt("LAS/LAZ root directory")
+    path = _clean_path(value)
+    if not path.exists() or not path.is_dir():
+        raise click.ClickException(f"LAS root directory not found: {path}")
+    return path
 
 
 def _run_wizard(config_path: Path) -> config_io.RunConfig:
     click.echo("LAS Dice setup wizard")
     click.echo("---------------------")
-    polygons_path: Path = click.prompt(
-        "Polygon dataset path",
-        type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    polygons_input = click.prompt("Polygon dataset path")
+    polygons_path = _clean_path(polygons_input)
+    if not polygons_path.exists() or not polygons_path.is_file():
+        raise click.ClickException(f"Polygon dataset not found: {polygons_path}")
+
+    polygons_layer: Optional[str] = None
+    layers: List[str] = []
+    if polygons_path.suffix.lower() == ".gpkg":
+        try:
+            layers = polygons.list_layers(polygons_path)
+        except Exception as exc:
+            log_info(f"Failed to list GPKG layers: {exc}")
+    if layers:
+        click.echo("Available layers:")
+        for idx, layer_name in enumerate(layers, start=1):
+            click.echo(f"  [{idx}] {layer_name}")
+        layer_index = click.prompt("Select layer number", type=int, default=1)
+        if layer_index < 1 or layer_index > len(layers):
+            raise click.ClickException("Layer selection out of range")
+        polygons_layer = layers[layer_index - 1]
+    elif polygons_path.suffix.lower() == ".gpkg":
+        layer_value = click.prompt(
+            "Polygon layer name (blank for none)", default="", show_default=False
+        )
+        polygons_layer = layer_value or None
+
+    try:
+        preview_gdf, _, _, fields = polygons.read_polygons(
+            polygons_path, polygons_layer
+        )
+    except Exception as exc:
+        raise click.ClickException(f"Failed to read polygons: {exc}")
+
+    polygon_crs = (
+        preview_gdf.crs.to_string() if preview_gdf.crs is not None else None
     )
-    layer_value = click.prompt(
-        "Polygon layer (blank for default)", default="", show_default=False
-    )
-    polygons_layer = layer_value or None
-    las_roots = _prompt_las_roots()
+    if polygon_crs is None:
+        raise click.ClickException("Polygon dataset has no defined CRS.")
+
+    if fields:
+        click.echo("Available fields:")
+        for idx, field_name in enumerate(fields, start=1):
+            click.echo(f"  [{idx}] {field_name}")
+    else:
+        click.echo("No non-geometry fields detected.")
+
+    if fields:
+        field_index = click.prompt(
+            "Select field number for naming", type=int, default=1
+        )
+        if field_index < 1 or field_index > len(fields):
+            raise click.ClickException("Naming field selection out of range")
+        name_field = fields[field_index - 1]
+    else:
+        name_field = None
+
+    las_root = _prompt_las_root()
+    las_roots = [las_root]
+
     suggested_tindex = polygons_path.parent / "las_tindex.gpkg"
-    tindex_path: Path = click.prompt(
-        "Tile index output path",
-        default=str(suggested_tindex),
-        type=click.Path(dir_okay=False, writable=True, path_type=Path),
-    )
+
+    tindex_input = click.prompt("Tile index output path", default=str(suggested_tindex))
+    tindex_path = _clean_path(tindex_input)
+    if tindex_path.exists() and tindex_path.is_dir():
+        tindex_path = tindex_path / suggested_tindex.name
+    if tindex_path.suffix.lower() not in {".gpkg", ".shp"}:
+        tindex_path = tindex_path.with_suffix(".gpkg")
     tindex_layer = click.prompt(
-        "Tile index layer name",
-        default=tindex.TINDEX_LAYER,
+        "Tile index layer name", default=tindex.TINDEX_LAYER
     )
-    output_dir: Path = click.prompt(
-        "Output directory",
-        type=click.Path(path_type=Path),
-        default=str(polygons_path.parent / "clipped_outputs"),
+
+    output_input = click.prompt(
+        "Output directory", default=str(polygons_path.parent / "clipped_outputs")
     )
-    name_field = click.prompt(
-        "Polygon attribute for naming (blank for default)",
-        default="",
-        show_default=False,
-    )
-    suffix = click.prompt(
+    output_dir = _clean_path(output_input)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    suffix_value = click.prompt(
         "Optional suffix to append (blank for none)", default="", show_default=False
     )
+    suffix = suffix_value or None
+
     fast_boundary = click.confirm(
         "Use fast boundary (recommended for large datasets)?", default=True
     )
-    config = config_io.RunConfig(
+
+    config = config_io.RunConfig(
         polygons=polygons_path,
         polygons_layer=polygons_layer,
         las_roots=las_roots,
         tindex_path=tindex_path,
         tindex_layer=tindex_layer,
         output_dir=output_dir,
-        name_field=name_field or None,
-        suffix=suffix or None,
+        name_field=name_field,
+        suffix=suffix,
         fast_boundary=fast_boundary,
+        target_srs=polygon_crs,
     )
-    saved = config_io.save_config(config, config_path)
-    log_info(f"Configuration saved to {saved}")
+    config_io.save_config(config, config_path)
     return config
-
 
 
 def _summarise_results(results: List[dict]) -> None:
@@ -121,25 +167,20 @@ def _summarise_results(results: List[dict]) -> None:
             log_info(f"  Polygon {row['polygon_id']} -> {row['output']}: {row['error']}")
 
 
-
 def _build_name_wrapper(poly_gdf, name_field: Optional[str], suffix: Optional[str]):
     options = NamingOptions(field=name_field, suffix=suffix)
-    base_getter = build_name_getter(options)
+    getter = build_name_getter(options)
 
     def wrapper(polygon_id: int) -> str:
         attrs = poly_gdf.iloc[polygon_id].to_dict()
         attrs.setdefault("polygon_id", polygon_id)
-        return base_getter(attrs)
+        return getter(attrs)
 
     return wrapper
 
 
-
 def _plan_outputs(
-    poly_gdf,
-    matches: Sequence[paths.PolygonSources],
-    outdir: Path,
-    name_builder,
+    poly_gdf, matches: Sequence[paths.PolygonSources], outdir: Path, name_builder
 ) -> Tuple[List[Tuple[paths.PolygonSources, Path]], List[int]]:
     planned: List[Tuple[paths.PolygonSources, Path]] = []
     empties: List[int] = []
@@ -153,17 +194,17 @@ def _plan_outputs(
     return planned, empties
 
 
-
 def _execute_clips(
     planned: Sequence[Tuple[paths.PolygonSources, Path]],
     poly_gdf,
     outdir: Path,
+    output_srs: Optional[str],
 ) -> List[dict]:
     results: List[dict] = []
     if not planned:
         return results
 
-    with progress_tracker("Clipping polygons", total=len(planned)) as advance:
+    with progress_tracker("Clipping LAS", total=len(planned)) as advance:
         for record, output_path in planned:
             if output_path.exists():
                 log_info(
@@ -185,6 +226,7 @@ def _execute_clips(
                     polygon_records=[record],
                     output_dir=outdir,
                     name_builder=lambda _: output_path.name,
+                    output_srs=output_srs,
                 )
             except Exception as exc:  # pragma: no cover
                 log_info(f"Polygon {record.polygon_id}: ERROR {exc}")
@@ -213,8 +255,6 @@ def _execute_clips(
             advance()
     return results
 
-
-
 def run_workflow(config_path: Path) -> None:
     """Run the full LAS Dice workflow after collecting configuration interactively."""
     config = _run_wizard(config_path)
@@ -229,6 +269,7 @@ def run_workflow(config_path: Path) -> None:
                 tindex.TINDEX_DRIVER,
                 overwrite=True,
                 fast_boundary=config.fast_boundary,
+                target_srs=config.target_srs,
             )
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc
@@ -237,7 +278,7 @@ def run_workflow(config_path: Path) -> None:
         log_info(line)
 
     try:
-        poly_gdf, _, _, _ = polygons.read_polygons(config.polygons, config.polygons_layer)
+        poly_gdf, _, _, fields = polygons.read_polygons(config.polygons, config.polygons_layer)
         tindex_gdf = tindex.read_tindex(config.tindex_path, config.tindex_layer)
         matches = paths.match_polygons_with_empty_reports(poly_gdf, tindex_gdf)
     except Exception as exc:
@@ -249,7 +290,7 @@ def run_workflow(config_path: Path) -> None:
     for pid in empties:
         log_info(f"Polygon {pid}: no intersecting LAS files")
 
-    results = _execute_clips(planned, poly_gdf, config.output_dir)
+    results = _execute_clips(planned, poly_gdf, config.output_dir, output_srs=config.target_srs)
     _summarise_results(results)
     config_io.save_config(config, config_path)
     log_info("Workflow completed")
@@ -344,7 +385,7 @@ def clip_cmd(
     for pid in empties:
         log_info(f"Polygon {pid}: no intersecting LAS files")
 
-    results = _execute_clips(planned, poly_gdf, outdir)
+    results = _execute_clips(planned, poly_gdf, outdir, output_srs=poly_crs)
     _summarise_results(results)
 
 
@@ -368,3 +409,12 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+
+
+
+

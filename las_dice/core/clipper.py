@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from typing import Iterable, List
+from typing import Iterable, List, Optional
 
 from geopandas import GeoSeries
 from shapely import to_wkt as shapely_to_wkt
@@ -34,6 +34,7 @@ def _build_pipeline(
     polygon_wkt: str,
     output_path: Path,
     forward_vlrs: bool = True,
+    output_srs: Optional[str] = None,
 ) -> dict:
     readers = [
         {
@@ -57,6 +58,8 @@ def _build_pipeline(
         "scale_y": 0.01,
         "scale_z": 0.01,
     }
+    if output_srs:
+        writer["a_srs"] = output_srs
     return {"pipeline": readers + filters + [writer]}
 
 
@@ -78,6 +81,7 @@ def clip_polygons(
     output_dir: Path,
     name_builder,
     forward_vlrs: bool = True,
+    output_srs: Optional[str] = None,
 ) -> List[Path]:
     """Clip LAS/LAZ files per polygon, returning produced output paths."""
     output_paths: List[Path] = []
@@ -88,7 +92,13 @@ def clip_polygons(
         polygon_wkt = _geometry_to_wkt(geometry)
         output_path = output_dir / name_builder(record.polygon_id)
         _ensure_output_dir(output_path)
-        pipeline = _build_pipeline(record.source_paths, polygon_wkt, output_path, forward_vlrs)
+        pipeline = _build_pipeline(
+            record.source_paths,
+            polygon_wkt,
+            output_path,
+            forward_vlrs,
+            output_srs=output_srs,
+        )
         _run_pipeline(pipeline)
         output_paths.append(output_path)
     return output_paths

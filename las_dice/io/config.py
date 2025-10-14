@@ -21,6 +21,7 @@ class RunConfig:
     name_field: Optional[str]
     suffix: Optional[str] = None
     fast_boundary: bool = True
+    target_srs: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "RunConfig":
@@ -34,6 +35,7 @@ class RunConfig:
             name_field=data.get("name_field"),
             suffix=data.get("suffix"),
             fast_boundary=data.get("fast_boundary", True),
+            target_srs=data.get("target_srs"),
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -42,6 +44,8 @@ class RunConfig:
         result["las_roots"] = [str(item) for item in self.las_roots]
         result["tindex_path"] = str(self.tindex_path)
         result["output_dir"] = str(self.output_dir)
+        if self.target_srs is None:
+            result.pop("target_srs", None)
         return result
 
 
