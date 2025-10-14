@@ -1,6 +1,6 @@
 # LAS Dice
 
-LAS Dice clips large LAS/LAZ collections against polygon footprints using PDAL. The CLI focuses on Windows-first workflows but keeps outputs portable.
+LAS Dice clips large LAS/LAZ collections against polygon footprints using PDAL. It bridges gaps between misaligned LAS tiles and polygon requests while keeping outputs portable.
 
 ## Quick start
 1. `conda env update -n las_dice -f environment.yml`
